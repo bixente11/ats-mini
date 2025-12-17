@@ -1,4 +1,9 @@
 Version adapted for esp32_1732S019(screen broken ats-mini original)
+files modified: 
+tft_setup.h (ST7789 SPI)
+Common.h (pins config)
+
+Add test mode without SI4732 (check screen(UI), rotary encoder...)
 
 # ATS Mini
 
