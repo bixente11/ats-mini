@@ -1,3 +1,5 @@
+Version adapted for esp32_1732S019(screen broken ats-mini original)
+
 # ATS Mini
 
 ![](docs/source/_static/esp32-si4732-ui-theme.jpg)
