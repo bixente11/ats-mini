@@ -1,4 +1,10 @@
 // =================================
+// MODE TEST CONFIGURATION
+// =================================
+// Mettre à true pour tester sans SI4735 (écran, encodeur, interface)
+#define TEST_MODE false
+
+// =================================
 // INCLUDE FILES
 // =================================
 
@@ -12,20 +18,19 @@
 #include "Themes.h"
 #include "Utils.h"
 #include "EIBI.h"
-#include "Remote.h"
-#include "Ble.h"
 
 // SI473/5 and UI
-#define MIN_ELAPSED_TIME         5  // 300
-#define MIN_ELAPSED_RSSI_TIME  200  // RSSI check uses IN_ELAPSED_RSSI_TIME * 6 = 1.2s
-#define ELAPSED_COMMAND      10000  // time to turn off the last command controlled by encoder. Time to goes back to the VFO control // G8PTN: Increased time and corrected comment
-#define DEFAULT_VOLUME          35  // change it for your favorite sound volume
-#define DEFAULT_SLEEP            0  // Default sleep interval, range = 0 (off) to 255 in steps of 5
-#define RDS_CHECK_TIME         250  // Increased from 90
-#define SEEK_TIMEOUT        600000  // Max seek timeout (ms)
-#define NTP_CHECK_TIME       60000  // NTP time refresh period (ms)
-#define SCHEDULE_CHECK_TIME   2000  // How often to identify the same frequency (ms)
-#define BACKGROUND_REFRESH_TIME 5000    // Background screen refresh time. Covers the situation where there are no other events causing a refresh
+#define MIN_ELAPSED_TIME         5
+#define MIN_ELAPSED_RSSI_TIME  200
+#define ELAPSED_COMMAND      10000
+#define DEFAULT_VOLUME          35
+#define DEFAULT_SLEEP            0
+#define STRENGTH_CHECK_TIME   1500
+#define RDS_CHECK_TIME         250
+#define SEEK_TIMEOUT        600000
+#define NTP_CHECK_TIME       60000
+#define SCHEDULE_CHECK_TIME   2000
+#define BACKGROUND_REFRESH_TIME 5000
 
 // =================================
 // CONSTANTS AND VARIABLES
@@ -36,52 +41,49 @@ uint8_t disableAgc = 0;
 int8_t agcNdx = 0;
 int8_t softMuteMaxAttIdx = 4;
 
-bool seekStop = false;        // G8PTN: Added flag to abort seeking on rotary encoder detection
-bool pushAndRotate = false;   // Push and rotate is active, ignore the long press
+bool seekStop = false;
+bool pushAndRotate = false;
 
 long elapsedRSSI = millis();
 long elapsedButton = millis();
-
 long lastStrengthCheck = millis();
 long lastRDSCheck = millis();
 long lastNTPCheck = millis();
 long lastScheduleCheck = millis();
-
 long elapsedCommand = millis();
+
 volatile int16_t encoderCount = 0;
 volatile int16_t encoderCountAccel = 0;
 uint16_t currentFrequency;
 
 // AGC/ATTN index per mode (FM/AM/SSB)
-int8_t FmAgcIdx = 0;                    // Default FM  AGGON  : Range = 0 to 37, 0 = AGCON, 1 - 27 = ATTN 0 to 26
-int8_t AmAgcIdx = 0;                    // Default AM  AGCON  : Range = 0 to 37, 0 = AGCON, 1 - 37 = ATTN 0 to 36
-int8_t SsbAgcIdx = 0;                   // Default SSB AGCON  : Range = 0 to 1,  0 = AGCON,      1 = ATTN 0
+int8_t FmAgcIdx = 0;
+int8_t AmAgcIdx = 0;
+int8_t SsbAgcIdx = 0;
 
 // AVC index per mode (AM/SSB)
-int8_t AmAvcIdx = 48;                   // Default AM  = 48 (as per AN332), range = 12 to 90 in steps of 2
-int8_t SsbAvcIdx = 48;                  // Default SSB = 48, range = 12 to 90 in steps of 2
+int8_t AmAvcIdx = 48;
+int8_t SsbAvcIdx = 48;
 
 // SoftMute index per mode (AM/SSB)
-int8_t AmSoftMuteIdx = 4;               // Default AM  = 4, range = 0 to 32
-int8_t SsbSoftMuteIdx = 4;              // Default SSB = 4, range = 0 to 32
+int8_t AmSoftMuteIdx = 4;
+int8_t SsbSoftMuteIdx = 4;
 
 // Menu options
-uint8_t volume = DEFAULT_VOLUME;        // Volume, range = 0 (muted) - 63
-uint8_t currentSquelch = 0;             // Squelch, range = 0 (disabled) - 127
-uint8_t FmRegionIdx = 0;                // FM Region
+uint8_t volume = DEFAULT_VOLUME;
+uint8_t currentSquelch = 0;
+uint8_t FmRegionIdx = 0;
 
-uint16_t currentBrt = 130;              // Display brightness, range = 10 to 255 in steps of 5
-uint16_t currentSleep = DEFAULT_SLEEP;  // Display sleep timeout, range = 0 to 255 in steps of 5
-long elapsedSleep = millis();           // Display sleep timer
-bool zoomMenu = false;                  // Display zoomed menu item
-int8_t scrollDirection = 1;             // Menu scroll direction
+uint16_t currentBrt = 130;
+uint16_t currentSleep = DEFAULT_SLEEP;
+long elapsedSleep = millis();
+bool zoomMenu = false;
+int8_t scrollDirection = 1;
 
 // Background screen refresh
-uint32_t background_timer = millis();   // Background screen refresh timer.
+uint32_t background_timer = millis();
 
-//
 // Current parameters
-//
 uint16_t currentCmd  = CMD_NONE;
 uint8_t  currentMode = FM;
 int16_t  currentBFO  = 0;
@@ -89,21 +91,12 @@ int16_t  currentBFO  = 0;
 uint8_t  rssi = 0;
 uint8_t  snr  = 0;
 
-//
-// Remotes
-//
-RemoteState remoteSerialState;
-RemoteState remoteBLEState;
-
-//
 // Devices
-//
 Rotary encoder  = Rotary(ENCODER_PIN_B, ENCODER_PIN_A);
 ButtonTracker pb1 = ButtonTracker();
 TFT_eSPI tft    = TFT_eSPI();
 TFT_eSprite spr = TFT_eSprite(&tft);
 SI4735_fixed rx;
-NordicUART BLESerial = NordicUART(RECEIVER_NAME);
 
 //
 // Hardware initialization and setup
@@ -111,54 +104,79 @@ NordicUART BLESerial = NordicUART(RECEIVER_NAME);
 void setup()
 {
   // Enable serial port
+  #if ARDUINO_USB_CDC_ON_BOOT
+    Serial.setTxTimeoutMs(0);
+  #endif
+  
   Serial.begin(115200);
+  delay(2000);
+  
+  // Attendre que le Serial soit prêt (max 3 secondes)
+  unsigned long startSerial = millis();
+  while (!Serial && (millis() - startSerial) < 3000) {
+    delay(100);
+  }
+  
+  Serial.println("\n\n=================================");
+  Serial.println("    ATS-MINI STARTUP");
+  Serial.println("=================================");
+  
+  if (TEST_MODE) {
+    Serial.println("*** MODE TEST ACTIF ***");
+    Serial.println("SI4735 et audio bypassés");
+    Serial.println("=================================\n");
+  }
 
   // Encoder pins. Enable internal pull-ups
   pinMode(ENCODER_PUSH_BUTTON, INPUT_PULLUP);
   pinMode(ENCODER_PIN_A, INPUT_PULLUP);
   pinMode(ENCODER_PIN_B, INPUT_PULLUP);
+  Serial.println("Encodeur configuré");
 
   // Enable audio amplifier
-  // Initally disable the audio amplifier until the SI4732 has been setup
   pinMode(PIN_AMP_EN, OUTPUT);
   digitalWrite(PIN_AMP_EN, LOW);
+  Serial.println("Ampli audio désactivé (init)");
 
   // Enable SI4732 VDD
   pinMode(PIN_POWER_ON, OUTPUT);
   digitalWrite(PIN_POWER_ON, HIGH);
   delay(100);
+  Serial.println("Alimentation SI4735 activée");
 
-  // The line below may be necessary to setup I2C pins on ESP32
+  // I2C setup
   Wire.begin(ESP32_I2C_SDA, ESP32_I2C_SCL);
+  Serial.println("I2C initialisé");
 
   // TFT display brightness control (PWM)
-  // Note: At brightness levels below 100%, switching from the PWM may cause power spikes and/or RFI
-  ledcAttach(PIN_LCD_BL, 16000, 8);  // Pin assignment, 16kHz, 8-bit
-  ledcWrite(PIN_LCD_BL, 0);          // Default value 0%
+  ledcAttach(PIN_LCD_BL, 16000, 8);
+  ledcWrite(PIN_LCD_BL, 0);
+  Serial.println("Backlight PWM configuré");
 
   // TFT display setup
-  tft.begin();
+  Serial.println("Initialisation TFT...");
+  tft.init();
   tft.setRotation(3);
 
   // Detect and fix the mirrored & inverted display
-  // https://github.com/esp32-si4732/ats-mini/issues/41
   uint8_t did3 = tft.readcommand8(ST7789_RDDID, 3);
-  // 0x048181B3 - the original display
-  // 0x04858552 - high gamma display
-  // 0x00009307 - inverted & mirrored display
+  Serial.print("Display ID: 0x");
+  Serial.println(did3, HEX);
+  
   if(did3 == 0x93)
   {
     tft.invertDisplay(0);
     tft.writecommand(TFT_MADCTL);
     tft.writedata(TFT_MAD_MV | TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_BGR);
+    Serial.println("Display: Mode mirrored/inverted corrigé");
   }
   else if(did3 == 0x85)
   {
-    tft.writecommand(0x26); // GAMSET
-    tft.writedata(8);       // Gamma Curve 3
-
-    tft.writecommand(0x55); // WRCACE (content adaptive brightness and color)
-    tft.writedata(0xB1);    // High enhancement, UI mode
+    tft.writecommand(0x26);
+    tft.writedata(8);
+    tft.writecommand(0x55);
+    tft.writedata(0xB1);
+    Serial.println("Display: High gamma mode activé");
   }
 
   tft.fillScreen(TH.bg);
@@ -167,15 +185,16 @@ void setup()
   spr.setSwapBytes(true);
   spr.setFreeFont(&Orbitron_Light_24);
   spr.setTextColor(TH.text, TH.bg);
+  Serial.println("TFT et sprite initialisés");
 
-  // Press and hold Encoder button to force an preferences reset
-  // Note: preferences reset is recommended after firmware updates
+  // Press and hold Encoder button to force preferences reset
   if(digitalRead(ENCODER_PUSH_BUTTON)==LOW)
   {
+    Serial.println("RESET DES PREFERENCES demandé");
     nvsErase();
     diskInit(true);
 
-    ledcWrite(PIN_LCD_BL, 255);       // Default value 255 = 100%
+    ledcWrite(PIN_LCD_BL, 255);
     tft.setTextSize(2);
     tft.setTextColor(TH.text, TH.bg);
     tft.println(getVersion(true));
@@ -183,100 +202,114 @@ void setup()
     tft.setTextColor(TH.text_warn, TH.bg);
     tft.print("Resetting Preferences");
     while(digitalRead(ENCODER_PUSH_BUTTON) == LOW) delay(100);
+    Serial.println("Préférences réinitialisées");
   }
 
   // Initialize flash file system
+  Serial.println("Initialisation système de fichiers...");
   diskInit();
 
-  if(!ESP.getPsramSize()) {
-    ledcWrite(PIN_LCD_BL, 255);       // Default value 255 = 100%
+  // SI4732 SETUP (BYPASS EN MODE TEST)
+  if (TEST_MODE) {
+    Serial.println("\n*** BYPASS SI4735 (MODE TEST) ***");
+    Serial.println("Simulation de la radio active\n");
+    
+    // Afficher un message à l'écran
+    ledcWrite(PIN_LCD_BL, 255);
+    tft.fillScreen(TH.bg);
     tft.setTextSize(2);
     tft.setTextColor(TH.text_warn, TH.bg);
-    tft.println("PSRAM not detected");
-#ifdef CONFIG_SPIRAM_MODE_OCT
-    tft.println("(try the QSPI f/w version)");
-#else
-    tft.println("(try the OSPI f/w version)");
-#endif
-  while(1);
+    tft.setCursor(10, 60);
+    tft.println("MODE TEST");
+    tft.setCursor(10, 90);
+    tft.setTextColor(TH.text, TH.bg);
+    tft.println("SI4735 bypasse");
+    tft.setCursor(10, 120);
+    tft.println("Interface active");
+    delay(2000);
+    
+  } else {
+    // MODE NORMAL: Initialisation SI4735
+    Serial.println("Recherche du SI4735...");
+    rx.setI2CFastModeCustom(800000UL);
+
+    int16_t si4735Addr = rx.getDeviceI2CAddress(RESET_PIN);
+    if(!si4735Addr)
+    {
+      Serial.println("ERREUR: SI4735 non détecté!");
+      ledcWrite(PIN_LCD_BL, 255);
+      tft.setTextSize(2);
+      tft.setTextColor(TH.text_warn, TH.bg);
+      tft.println("Si4732 not detected");
+      while(1) delay(1000);
+    }
+    Serial.println("SI4735 trouvé!");
+
+    rx.setup(RESET_PIN, MW_BAND_TYPE);
+    rx.setAudioMuteMcuPin(AUDIO_MUTE);
+    Serial.println("SI4735 configuré");
   }
 
-  // Check for SI4732 connected on I2C interface
-  // If the SI4732 is not detected, then halt with no further processing
-  rx.setI2CFastModeCustom(800000UL);
-
-  // Looks for the I2C bus address and set it.  Returns 0 if error
-  int16_t si4735Addr = rx.getDeviceI2CAddress(RESET_PIN);
-  if(!si4735Addr)
-  {
-    ledcWrite(PIN_LCD_BL, 255);       // Default value 255 = 100%
-    tft.setTextSize(2);
-    tft.setTextColor(TH.text_warn, TH.bg);
-    tft.println("Si4732 not detected");
-    while(1);
-  }
-
-  rx.setup(RESET_PIN, MW_BAND_TYPE);
-  // Comment the line above and uncomment the three lines below if you are using external ref clock (active crystal or signal generator)
-  // rx.setRefClock(32768);
-  // rx.setRefClockPrescaler(1);   // will work with 32768
-  // rx.setup(RESET_PIN, 0, MW_BAND_TYPE, SI473X_ANALOG_AUDIO, XOSCEN_RCLK);
-
-  // Attached pin to allows SI4732 library to mute audio as required to minimise loud clicks
-  rx.setAudioMuteMcuPin(AUDIO_MUTE);
-
-  // If loading preferences fails...
+  // Load preferences
+  Serial.println("Chargement des préférences...");
   if(!prefsLoad(SAVE_SETTINGS|SAVE_VERIFY))
   {
-    // Save default preferences
     prefsSave(SAVE_SETTINGS);
-    // Show initial screen with the QR code
     spr.fillSprite(TH.bg);
     ledcWrite(PIN_LCD_BL, currentBrt);
     drawAboutHelp(0);
-    // Wait for an encoder click
     while(digitalRead(ENCODER_PUSH_BUTTON)!=LOW) delay(100);
     while(digitalRead(ENCODER_PUSH_BUTTON)==LOW) delay(100);
   }
 
-  // If loading memories fails, save default memories
   if(!prefsLoad(SAVE_MEMORIES|SAVE_VERIFY)) prefsSave(SAVE_MEMORIES);
-
-  // If loading bands fails, save default bands
   if(!prefsLoad(SAVE_BANDS|SAVE_VERIFY)) prefsSave(SAVE_BANDS);
 
-  // Audio Amplifier Enable. G8PTN: Added
-  // After the SI4732 has been setup, enable the audio amplifier
-  digitalWrite(PIN_AMP_EN, HIGH);
+  // Enable audio amplifier (sauf en mode test)
+  if (!TEST_MODE) {
+    digitalWrite(PIN_AMP_EN, HIGH);
+    Serial.println("Ampli audio activé");
+  } else {
+    Serial.println("Ampli audio désactivé (MODE TEST)");
+  }
 
-  // SI4732 STARTUP!
-  selectBand(bandIdx, false);
-  delay(50);
-  rx.setVolume(volume);
-  rx.setMaxSeekTime(SEEK_TIMEOUT);
+  // SI4732 STARTUP (sauf en mode test)
+  if (!TEST_MODE) {
+    selectBand(bandIdx, false);
+    delay(50);
+    rx.setVolume(volume);
+    rx.setMaxSeekTime(SEEK_TIMEOUT);
+  }
 
   // Draw display for the first time
+  Serial.println("Affichage initial...");
   drawScreen();
   ledcWrite(PIN_LCD_BL, currentBrt);
 
   // Interrupt actions for Rotary encoder
-  // Note: Moved to end of setup to avoid inital interrupt actions
-  // ICACHE_RAM_ATTR void rotaryEncoder(); see rotaryEncoder implementation below.
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
+  Serial.println("Interruptions encodeur configurées");
 
   // Connect WiFi, if necessary
   netInit(wifiModeIdx);
 
   // Start Bluetooth LE, if necessary
   bleInit(bleModeIdx);
-}
 
+  Serial.println("\n=================================");
+  Serial.println("   INITIALISATION TERMINEE");
+  if (TEST_MODE) {
+    Serial.println("   MODE TEST ACTIF");
+    Serial.println("Tournez l'encodeur pour tester");
+  }
+  Serial.println("=================================\n");
+}
 
 int16_t accelerateEncoder(int8_t dir)
 {
-  const uint32_t speedThresholds[] = {350, 60, 45, 35, 25}; // ms between clicks
-  const uint16_t accelFactors[] =      {1,  2,  4,  8, 16}; // corresponding multipliers
+  const uint32_t speedThresholds[] = {350, 60, 45, 35, 25};
+  const uint16_t accelFactors[] =      {1,  2,  4,  8, 16};
   static uint32_t lastEncoderTime = 0;
   static uint32_t lastSpeed = speedThresholds[0];
   static uint16_t lastAccelFactor = accelFactors[0];
@@ -285,12 +318,10 @@ int16_t accelerateEncoder(int8_t dir)
   uint32_t currentTime = millis();
   lastSpeed = ((currentTime - lastEncoderTime) * 7 + lastSpeed * 3) / 10;
 
-  // Reset acceleration on timeout or direction change
   if (lastSpeed > speedThresholds[0] || lastEncoderDir != dir) {
     lastSpeed = speedThresholds[0];
     lastAccelFactor = accelFactors[0];
   } else {
-    // Lookup acceleration factor
     for (int8_t i = LAST_ITEM(speedThresholds); i >= 0; i--) {
       if (lastSpeed <= speedThresholds[i] && lastAccelFactor < accelFactors[i]) {
         lastAccelFactor = accelFactors[i];
@@ -301,35 +332,30 @@ int16_t accelerateEncoder(int8_t dir)
   lastEncoderTime = currentTime;
   lastEncoderDir = dir;
 
-  // Apply acceleration with direction
   return(dir * lastAccelFactor);
 }
 
-//
-// Reads encoder via interrupt
-// Uses Rotary.h and Rotary.cpp implementation to process encoder via
-// interrupt. If you do not add ICACHE_RAM_ATTR declaration, the system
-// will reboot during attachInterrupt call. The ICACHE_RAM_ATTR macro
-// places this function into RAM.
-//
 ICACHE_RAM_ATTR void rotaryEncoder()
 {
-  // Rotary encoder events
   uint8_t encoderStatus = encoder.process();
   if(encoderStatus)
   {
     int8_t delta = encoderStatus==DIR_CW? 1 : -1;
     int16_t accelDelta = accelerateEncoder(delta);
 
-    // Do not accumulate too many encoder steps if event loop doesn't consume them
     if(abs(encoderCount) < 5)
     {
       encoderCount += delta;
       encoderCountAccel += accelDelta;
     }
 
-    // Reset the seek flag
     seekStop = true;
+    
+    // Debug en mode test
+    if (TEST_MODE) {
+      Serial.print("Encodeur: ");
+      Serial.println(delta > 0 ? "CW" : "CCW");
+    }
   }
 }
 
@@ -345,110 +371,88 @@ uint32_t consumeEncoderCounts()
   return ((uint32_t)encCountAccel << 16) | ((uint16_t)encCount & 0xFFFF);
 }
 
-//
-// Switch radio to given band
-//
 void useBand(const Band *band)
 {
-  // Set current frequency and mode, reset BFO
+  if (TEST_MODE) {
+    Serial.print("useBand() MODE TEST: ");
+    Serial.println(band->bandName);
+    currentFrequency = band->currentFreq;
+    currentMode = band->bandMode;
+    currentBFO = 0;
+    return;
+  }
+  
+  // Code normal SI4735...
   currentFrequency = band->currentFreq;
   currentMode = band->bandMode;
   currentBFO = 0;
 
   if(band->bandMode==FM)
   {
-    // rx.setMaxDelaySetFrequency(60);
     rx.setFM(band->minimumFreq, band->maximumFreq, band->currentFreq, getCurrentStep()->step);
-    // rx.setTuneFrequencyAntennaCapacitor(0);
     rx.setSeekFmLimits(band->minimumFreq, band->maximumFreq);
-
-    // More sensitive seek thresholds
-    // https://github.com/pu2clr/SI4735/issues/7#issuecomment-810963604
-    rx.setSeekFmRssiThreshold(5); // default is 20
-    rx.setSeekFmSNRThreshold(2); // default is 3
-
+    rx.setSeekFmRssiThreshold(5);
+    rx.setSeekFmSNRThreshold(2);
     rx.setFMDeEmphasis(fmRegions[FmRegionIdx].value);
     rx.RdsInit();
     rx.setRdsConfig(1, 2, 2, 2, 2);
-    rx.setGpioCtl(1, 0, 0);   // G8PTN: Enable GPIO1 as output
-    rx.setGpio(0, 0, 0);      // G8PTN: Set GPIO1 = 0
+    rx.setGpioCtl(1, 0, 0);
+    rx.setGpio(0, 0, 0);
   }
   else
   {
-    // rx.setMaxDelaySetFrequency(80);
     if(band->bandMode==AM)
     {
       rx.setAM(band->minimumFreq, band->maximumFreq, band->currentFreq, getCurrentStep()->step);
-      // More sensitive seek thresholds
-      // https://github.com/pu2clr/SI4735/issues/7#issuecomment-810963604
-      rx.setSeekAmRssiThreshold(10); // default is 25
-      rx.setSeekAmSNRThreshold(3); // default is 5
+      rx.setSeekAmRssiThreshold(10);
+      rx.setSeekAmSNRThreshold(3);
     }
     else
     {
-      // Configure SI4732 for SSB (SI4732 step not used, set to 0)
       rx.setSSB(band->minimumFreq, band->maximumFreq, band->currentFreq, 0, currentMode);
-      // G8PTN: Always enabled
       rx.setSSBAutomaticVolumeControl(1);
-      // G8PTN: Commented out
-      //rx.setSsbSoftMuteMaxAttenuation(softMuteMaxAttIdx);
-      // To move frequency forward, need to move the BFO backwards
       if (currentMode == USB)
         rx.setSSBBfo(-(currentBFO + band->usbCal));
       else if (currentMode == LSB)
         rx.setSSBBfo(-(currentBFO + band->lsbCal));
       else
-        rx.setSSBBfo(-currentBFO);  // No calibration if not USB/LSB
+        rx.setSSBBfo(-currentBFO);
     }
-
-    // Set the tuning capacitor for SW or MW/LW
-    // rx.setTuneFrequencyAntennaCapacitor((band->bandType == MW_BAND_TYPE || band->bandType == LW_BAND_TYPE) ? 0 : 1);
-
-    // G8PTN: Enable GPIO1 as output
     rx.setGpioCtl(1, 0, 0);
-    // G8PTN: Set GPIO1 = 1
     rx.setGpio(1, 0, 0);
-    // Consider the range all defined current band
     rx.setSeekAmLimits(band->minimumFreq, band->maximumFreq);
   }
 
-  // Set step and spacing based on mode (FM, AM, SSB)
   doStep(0);
-  // Set softMuteMaxAttIdx based on mode (AM, SSB)
   doSoftMute(0);
-  // Set disableAgc and agcNdx values based on mode (FM, AM , SSB)
   doAgc(0);
-  // Set currentAVC values based on mode (AM, SSB)
   doAvc(0);
-  // Wait a bit for things to calm down
   delay(100);
-  // Clear signal strength readings
   rssi = 0;
   snr  = 0;
 }
 
-//
-// Tune using BFO, using algorithm from Goshante's ATS-20_EX firmware
-//
 bool updateBFO(int newBFO, bool wrap)
 {
+  if (TEST_MODE) {
+    Serial.print("updateBFO() MODE TEST: ");
+    Serial.println(newBFO);
+    currentBFO = newBFO;
+    return true;
+  }
+  
   Band *band = getCurrentBand();
   int newFreq = currentFrequency;
 
-  // No BFO outside SSB modes
   if(!isSSB()) newBFO = 0;
 
-  // If new BFO exceeds allowed bounds...
   if(newBFO > MAX_BFO || newBFO < -MAX_BFO)
   {
-    // Compute correction
     int fCorrect = (newBFO / MAX_BFO) * MAX_BFO;
-    // Correct new frequency and BFO
     newFreq += fCorrect / 1000;
     newBFO  -= fCorrect;
   }
 
-  // Do not let new frequency exceed band limits
   int f = newFreq * 1000 + newBFO;
   if(f < band->minimumFreq * 1000)
   {
@@ -463,42 +467,37 @@ bool updateBFO(int newBFO, bool wrap)
     newBFO  = 0;
   }
 
-  // If need to change frequency...
   if(newFreq != currentFrequency)
   {
-    // Apply new frequency
     rx.setFrequency(newFreq);
-
-    // Re-apply to remove noise
     doAgc(0);
-    // Update current frequency
     currentFrequency = rx.getFrequency();
   }
 
-  // Update current BFO
   currentBFO = newBFO;
 
-  // To move frequency forward, need to move the BFO backwards
   if (currentMode == USB)
     rx.setSSBBfo(-(currentBFO + band->usbCal));
   else if (currentMode == LSB)
     rx.setSSBBfo(-(currentBFO + band->lsbCal));
   else
-    rx.setSSBBfo(-currentBFO);  // No calibration if not USB/LSB
+    rx.setSSBBfo(-currentBFO);
 
-  // Save current band frequency, w.r.t. new BFO value
   band->currentFreq = currentFrequency + currentBFO / 1000;
   return true;
 }
 
-//
-// Tune to a new frequency, resetting BFO if present
-//
 bool updateFrequency(int newFreq, bool wrap)
 {
+  if (TEST_MODE) {
+    Serial.print("updateFrequency() MODE TEST: ");
+    Serial.println(newFreq);
+    currentFrequency = newFreq;
+    return true;
+  }
+  
   Band *band = getCurrentBand();
 
-  // Do not let new frequency exceed band limits
   if(newFreq < band->minimumFreq)
   {
     if(!wrap) return false; else newFreq = band->maximumFreq;
@@ -508,31 +507,21 @@ bool updateFrequency(int newFreq, bool wrap)
     if(!wrap) return false; else newFreq = band->minimumFreq;
   }
 
-  // Set new frequency
   rx.setFrequency(newFreq);
 
-  // Clear BFO, if present
   if(currentBFO) updateBFO(0, true);
 
-  // Update current frequency
   currentFrequency = rx.getFrequency();
-
-  // Save current band frequency
   band->currentFreq = currentFrequency + currentBFO / 1000;
   return true;
 }
 
-// This function is called by the seek function process.
 bool checkStopSeeking()
 {
-  // Returns true if the user rotates the encoder
   if(seekStop) return true;
 
-  // Checking isPressed without debouncing because this callback
-  // is not invoked often enough to register a click
   if(pb1.update(digitalRead(ENCODER_PUSH_BUTTON) == LOW, 0).isPressed)
   {
-    // Wait till the button is released, otherwise the main loop will register a click
     while(pb1.update(digitalRead(ENCODER_PUSH_BUTTON) == LOW).isPressed)
       delay(100);
     return true;
@@ -541,19 +530,19 @@ bool checkStopSeeking()
   return false;
 }
 
-// This function is called by the seek function process.
 void showFrequencySeek(uint16_t freq)
 {
   currentFrequency = freq;
   drawScreen();
 }
 
-//
-// Handle encoder rotation in seek mode
-//
 bool doSeek(int16_t enc, int16_t enca)
 {
-  // disable amp to avoid sound artifacts
+  if (TEST_MODE) {
+    Serial.println("doSeek() MODE TEST");
+    return false;
+  }
+  
   muteOn(MUTE_TEMP, true);
   if(seekMode() == SEEK_DEFAULT)
   {
@@ -563,11 +552,8 @@ bool doSeek(int16_t enc, int16_t enca)
     }
     else
     {
-      // Clear stale parameters
       clearStationInfo();
       rssi = snr = 0;
-
-      // Flag is set by rotary encoder and cleared on seek/scan entry
       seekStop = false;
       rx.seekStationProgress(showFrequencySeek, checkStopSeeking, enc>0? 1 : 0);
       updateFrequency(rx.getFrequency(), true);
@@ -576,7 +562,6 @@ bool doSeek(int16_t enc, int16_t enca)
   else if(seekMode() == SEEK_SCHEDULE && enc)
   {
     uint8_t hour, minute;
-    // Clock is valid because the above seekMode() call checks that
     clockGetHM(&hour, &minute);
 
     size_t offset = -1;
@@ -587,24 +572,19 @@ bool doSeek(int16_t enc, int16_t enca)
     if(schedule) updateFrequency(schedule->freq, false);
   }
 
-  // Clear current station name and information
   clearStationInfo();
-  // Check for named frequencies
   identifyFrequency(currentFrequency + currentBFO / 1000);
-  // Will need a redraw
-  // enable amp
   muteOn(MUTE_TEMP, false);
   return(true);
 }
 
-//
-// Handle tuning
-//
 bool doTune(int16_t enc)
 {
-  //
-  // SSB tuning
-  //
+  if (TEST_MODE) {
+    Serial.print("doTune() MODE TEST: ");
+    Serial.println(enc > 0 ? "UP" : "DOWN");
+  }
+  
   if(isSSB())
   {
     uint32_t step = getCurrentStep()->step;
@@ -613,10 +593,6 @@ bool doTune(int16_t enc)
 
     updateBFO(currentBFO + enc * step, true);
   }
-
-  //
-  // Normal tuning
-  //
   else
   {
     uint16_t step = getCurrentStep()->step;
@@ -624,69 +600,48 @@ bool doTune(int16_t enc)
     stepAdjust = (currentMode==FM) && (step==20)? (stepAdjust+10) % step : stepAdjust;
     step = !stepAdjust? step : enc>0? step - stepAdjust : stepAdjust;
 
-    // Tune to a new frequency
     updateFrequency(currentFrequency + step * enc, true);
   }
 
-  // Clear current station name and information
   clearStationInfo();
-  // Check for named frequencies
   identifyFrequency(currentFrequency + currentBFO / 1000);
-  // Will need a redraw
   return(true);
 }
 
-//
-// Rotate digit
-//
 bool doDigit(int16_t enc)
 {
   bool updated = false;
 
-  // SSB tuning
   if(isSSB())
   {
     updated = updateBFO(currentBFO + enc * getFreqInputStep(), false);
   }
-
-  //
-  // Normal tuning
-  //
   else
   {
-    // Tune to a new frequency
     updated = updateFrequency(currentFrequency + enc * getFreqInputStep(), false);
   }
 
   if (updated) {
-    // Clear current station name and information
     clearStationInfo();
-    // Check for named frequencies
     identifyFrequency(currentFrequency + currentBFO / 1000);
   }
 
-  // Will need a redraw
   return(updated);
 }
-
 
 bool clickFreq(bool shortPress)
 {
   if (shortPress) {
     bool updated = false;
 
-     // SSB tuning
      if(isSSB()) {
        updated = updateBFO(currentBFO - (currentFrequency * 1000 + currentBFO) % getFreqInputStep(), false);
      } else {
-       // Normal tuning
        updated = updateFrequency(currentFrequency - currentFrequency % getFreqInputStep(), false);
      }
 
      if (updated) {
-       // Clear current station name and information
        clearStationInfo();
-       // Check for named frequencies
        identifyFrequency(currentFrequency + currentBFO / 1000);
      }
      return true;
@@ -696,6 +651,17 @@ bool clickFreq(bool shortPress)
 
 bool processRssiSnr()
 {
+  if (TEST_MODE) {
+    // Simulation de RSSI/SNR aléatoire
+    static uint32_t simCounter = 0;
+    if (!(simCounter++ % 10)) {
+      rssi = 20 + (millis() / 1000) % 40;
+      snr = 10 + (millis() / 500) % 20;
+      return true;
+    }
+    return false;
+  }
+  
   static uint32_t updateCounter = 0;
   bool needRedraw = false;
 
@@ -703,7 +669,6 @@ bool processRssiSnr()
   int newRSSI = rx.getCurrentRSSI();
   int newSNR = rx.getCurrentSNR();
 
-  // Apply squelch if the volume is not muted
   if(currentSquelch && currentSquelch <= 127)
   {
     if(newRSSI >= currentSquelch && muteOn(MUTE_SQUELCH))
@@ -720,16 +685,13 @@ bool processRssiSnr()
     muteOn(MUTE_SQUELCH, false);
   }
 
-  // G8PTN: Based on 1.2s interval, update RSSI & SNR
   if(!(updateCounter++ & 7))
   {
-    // Show RSSI status only if this condition has changed
     if(newRSSI != rssi)
     {
       rssi = newRSSI;
       needRedraw = true;
     }
-    // Show SNR status only if this condition has changed
     if(newSNR != snr)
     {
       snr = newSNR;
@@ -753,123 +715,94 @@ void loop()
 
   ButtonTracker::State pb1st = pb1.update(digitalRead(ENCODER_PUSH_BUTTON) == LOW);
 
-  // Periodically print status to remote interfaces
-  serialTickTime(&Serial, &remoteSerialState, serialModeIdx);
-  remoteBLETickTime(&BLESerial, &remoteBLEState, bleModeIdx);
+  // Debug en mode test
+  if (TEST_MODE && pb1st.wasClicked) {
+    Serial.println("Bouton: Click");
+  }
+  if (TEST_MODE && pb1st.isLongPressed) {
+    Serial.println("Bouton: Long Press");
+  }
 
-  // if(encCount && getCpuFrequencyMhz()!=240) setCpuFrequencyMhz(240);
+  remoteTickTime();
 
-  // Receive and execute serial command
-  int ser_event = serialDoCommand(&Serial, &remoteSerialState, serialModeIdx);
-  needRedraw |= !!(ser_event & REMOTE_CHANGED);
-  pb1st.wasClicked |= !!(ser_event & REMOTE_CLICK);
-  int ser_direction = ser_event >> REMOTE_DIRECTION;
-  encCount = ser_direction? ser_direction : encCount;
-  encCountAccel = ser_direction? ser_direction : encCountAccel;
-  if(ser_event & REMOTE_PREFS) prefsRequestSave(SAVE_ALL);
+  if(Serial.available()>0)
+  {
+    int revent = remoteDoCommand(Serial.read());
+    needRedraw |= !!(revent & REMOTE_CHANGED);
+    pb1st.wasClicked |= !!(revent & REMOTE_CLICK);
+    int direction = revent >> REMOTE_DIRECTION;
+    encCount = direction? direction : encCount;
+    encCountAccel = direction? direction : encCountAccel;
+    if(revent & REMOTE_PREFS) prefsRequestSave(SAVE_ALL);
+  }
 
-  // Receive and execute BLE command
-  int ble_event = bleDoCommand(&BLESerial, &remoteBLEState, bleModeIdx);
-  needRedraw |= !!(ble_event & REMOTE_CHANGED);
-  pb1st.wasClicked |= !!(ble_event & REMOTE_CLICK);
-  int ble_direction = ble_event >> REMOTE_DIRECTION;
-  encCount = ble_direction? ble_direction : encCount;
-  encCountAccel = ble_direction? ble_direction : encCountAccel;
-  if(ble_event & REMOTE_PREFS) prefsRequestSave(SAVE_ALL);
+  int ble_event = bleDoCommand(bleModeIdx);
 
-  // Block encoder rotation when in the locked sleep mode
   if(encCount && sleepOn() && sleepModeIdx==SLEEP_LOCKED) encCount = encCountAccel = 0;
 
-  // Activate push and rotate mode (can span multiple loop iterations until the button is released)
   if (encCount && pb1st.isPressed) pushAndRotate = true;
 
-  // If push and rotate mode is active...
   if(pushAndRotate)
   {
-    // If encoder has been rotated
     if(encCount)
     {
       switch(currentCmd)
       {
         case CMD_NONE:
-          // Activate frequency input mode
           currentCmd = CMD_FREQ;
           needRedraw = true;
           break;
         case CMD_FREQ:
-          // Select digit
           doSelectDigit(encCount);
           needRedraw = true;
           break;
         case CMD_SEEK:
-          // Normal tuning in seek mode
           needRedraw |= doTune(encCount);
-          // Current frequency may have changed
           prefsRequestSave(SAVE_CUR_BAND);
           break;
       }
     }
-    // Reset timeouts while push and rotate is active
     elapsedSleep = elapsedCommand = currentTime;
   }
   else
   {
-    // If encoder has been rotated
     if(encCount)
     {
       switch(currentCmd)
       {
         case CMD_NONE:
         case CMD_SCAN:
-          // Tuning
           needRedraw |= doTune(encCountAccel);
-          // Current frequency may have changed
           prefsRequestSave(SAVE_CUR_BAND);
           break;
         case CMD_FREQ:
-          // Digit tuning
           needRedraw |= doDigit(encCount);
-          // Current frequency may have changed
           prefsRequestSave(SAVE_CUR_BAND);
           break;
         case CMD_SEEK:
-          // Seek mode
           needRedraw |= doSeek(encCount, encCountAccel);
-          // Seek can take long time, renew the timestamp
           currentTime = millis();
-          // Current frequency may have changed
           prefsRequestSave(SAVE_CUR_BAND);
           break;
         default:
-          // Side bar menus / settings
           needRedraw |= doSideBar(currentCmd, encCount, encCountAccel);
-          // Current settings, etc. may have changed
           prefsRequestSave(SAVE_ALL);
           break;
       }
 
-      // Reset timeouts
       elapsedSleep = elapsedCommand = currentTime;
     }
     else if(pb1st.isLongPressed)
     {
-      // Encoder is being LONG PRESSED: TOGGLE DISPLAY
       sleepOn(!sleepOn());
-      // CPU sleep can take long time, renew the timestamps
       elapsedSleep = elapsedCommand = currentTime = millis();
-
     }
     else if(pb1st.wasClicked || pb1st.wasShortPressed)
     {
-      // Encoder click or short press
-      // Reset timeouts
       elapsedSleep = elapsedCommand = currentTime;
 
-      // If in locked/unlocked sleep mode
       if(sleepOn())
       {
-        // If sleep timeout is enabled, exit it via button press of any duration
-        // (users don't need to figure out that a long press is required to wake up the device)
         if(currentSleep)
         {
           sleepOn(false);
@@ -877,7 +810,6 @@ void loop()
         }
         else if(sleepModeIdx == SLEEP_UNLOCKED)
         {
-          // Allow to adjust the volume in sleep mode
           if(pb1st.wasShortPressed && currentCmd==CMD_NONE)
             currentCmd = CMD_VOLUME;
           else if(currentCmd==CMD_VOLUME)
@@ -888,44 +820,35 @@ void loop()
       }
       else if(clickHandler(currentCmd, pb1st.wasShortPressed))
       {
-        // Command handled, redraw screen
         needRedraw = true;
-
-        // EiBi can take long time, renew the timestamps
         elapsedSleep = elapsedCommand = currentTime = millis();
       }
       else if(currentCmd != CMD_NONE)
       {
-        // Deactivate modal mode
         currentCmd = CMD_NONE;
         needRedraw = true;
       }
       else if(pb1st.wasShortPressed)
       {
-        // Volume shortcut (only active in VFO mode)
         currentCmd = CMD_VOLUME;
         needRedraw = true;
       }
       else
       {
-        // Activate menu
         currentCmd = CMD_MENU;
         needRedraw = true;
       }
     }
   }
 
-  // Deactivate push and rotate mode
   if(!pb1st.isPressed && pushAndRotate)
   {
     pushAndRotate = false;
     needRedraw = true;
   }
 
-  // Disable commands control
   if((currentTime - elapsedCommand) > ELAPSED_COMMAND)
   {
-    // if(getCpuFrequencyMhz()!=80) setCpuFrequencyMhz(80);
     if(currentCmd != CMD_NONE && currentCmd != CMD_SEEK && currentCmd != CMD_SCAN && currentCmd != CMD_MEMORY)
     {
       currentCmd = CMD_NONE;
@@ -935,11 +858,9 @@ void loop()
     elapsedCommand = currentTime;
   }
 
-  // Display sleep timeout
   if(currentSleep && !sleepOn() && ((currentTime - elapsedSleep) > currentSleep * 1000))
   {
     sleepOn(true);
-    // CPU sleep can take long time, renew the timestamps
     elapsedSleep = elapsedCommand = currentTime = millis();
   }
 
@@ -949,39 +870,30 @@ void loop()
     elapsedRSSI = currentTime;
   }
 
-  // Periodically check received RDS information
   if((currentTime - lastRDSCheck) > RDS_CHECK_TIME)
   {
-    needRedraw |= (currentMode == FM) && (snr >= 12) && checkRds();
+    if (!TEST_MODE) {
+      needRedraw |= (currentMode == FM) && (snr >= 12) && checkRds();
+    }
     lastRDSCheck = currentTime;
   }
 
-  // Periodically check schedule
   if((currentTime - lastScheduleCheck) > SCHEDULE_CHECK_TIME)
   {
     needRedraw |= identifyFrequency(currentFrequency + currentBFO / 1000, true);
     lastScheduleCheck = currentTime;
   }
 
-  // Periodically synchronize time via NTP
   if((currentTime - lastNTPCheck) > NTP_CHECK_TIME)
   {
     needRedraw |= ntpSyncTime();
     lastNTPCheck = currentTime;
   }
 
-  // Tick preferences time, saving changes when there has
-  // been no activity for a while
   prefsTickTime();
-
-  // Tick NETWORK time, connecting to WiFi if requested
   netTickTime();
-
-  // Run clock
   needRedraw |= clockTickTime();
 
-  // Periodically refresh the main screen
-  // This covers the case where there is nothing else triggering a refresh
   if(needRedraw) background_timer = currentTime;
   if((currentTime - background_timer) > BACKGROUND_REFRESH_TIME)
   {
@@ -989,9 +901,7 @@ void loop()
     background_timer = currentTime;
   }
 
-  // Redraw screen if necessary
   if(needRedraw) drawScreen();
 
-  // Add a small default delay in the main loop
   delay(5);
 }
