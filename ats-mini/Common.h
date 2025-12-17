@@ -39,21 +39,21 @@
 #define SLEEP_LIGHT    2 // ESP32 light sleep
 
 // SI4732/5 PINs
-#define PIN_POWER_ON  15            // GPIO15   External LDO regulator enable (1 = Enable)
-#define RESET_PIN     16            // GPIO16   SI4732/5 Reset
-#define ESP32_I2C_SCL 17            // GPIO17   SI4732/5 Clock
-#define ESP32_I2C_SDA 18            // GPIO18   SI4732/5 Data
-#define AUDIO_MUTE     3            // GPIO3    Hardware L/R mute, controlled via SI4735 code (1 = Mute)
-#define PIN_AMP_EN    10            // GPIO10   Hardware Audio Amplifer enable (1 = Enable)
+#define PIN_POWER_ON  18            // GPIO15   External LDO regulator enable (1 = Enable)
+#define RESET_PIN     19            // GPIO16   SI4732/5 Reset
+#define ESP32_I2C_SCL 48            // GPIO17   SI4732/5 Clock
+#define ESP32_I2C_SDA 47            // GPIO18   SI4732/5 Data
+#define AUDIO_MUTE    20            // GPIO3    Hardware L/R mute, controlled via SI4735 code (1 = Mute)
+#define PIN_AMP_EN    2            // GPIO10   Hardware Audio Amplifer enable (1 = Enable)
 
 // Display PINs
-#define PIN_LCD_BL    38            // GPIO38   LCD backlight (PWM brightness control)
+#define PIN_LCD_BL    14            // GPIO38   LCD backlight (PWM brightness control)
 // All other pins are defined by the TFT_eSPI library
 
 // Rotary Enconder PINs
-#define ENCODER_PIN_A  2            // GPIO02
-#define ENCODER_PIN_B  1            // GPIO01
-#define ENCODER_PUSH_BUTTON 21      // GPIO21
+#define ENCODER_PIN_A  40            // GPIO02
+#define ENCODER_PIN_B  41            // GPIO01
+#define ENCODER_PUSH_BUTTON 42      // GPIO21
 
 // Compute number of items in an array
 #define ITEM_COUNT(array) (sizeof(array) / sizeof((array)[0]))
@@ -72,11 +72,7 @@
 
 // Bluetooth modes
 #define BLE_OFF        0 // Bluetooth is disabled
-#define BLE_ADHOC      1 // Ad hoc BLE serial protocol
-
-// Serial modes
-#define SERIAL_OFF     0 // Serial is disabled
-#define SERIAL_ADHOC   1 // Ad hoc serial protocol
+#define BLE_BLUEFRUIT  1 // Bluefruit Connect app mode
 
 //
 // Data Types
@@ -160,7 +156,6 @@ extern int8_t SsbAvcIdx;
 extern int8_t AmSoftMuteIdx;
 extern int8_t SsbSoftMuteIdx;
 extern uint8_t rdsModeIdx;
-extern uint8_t serialModeIdx;
 extern uint8_t bleModeIdx;
 extern uint8_t wifiModeIdx;
 extern uint8_t FmRegionIdx;
@@ -211,10 +206,19 @@ bool ntpSyncTime();
 void netRequestConnect();
 void netTickTime();
 
+// Ble.cpp
+int bleDoCommand(uint8_t bleModeIdx);
+void bleInit(uint8_t bleMode);
+void bleStop();
+int8_t getBleStatus();
+
 // Remote.c
 #define REMOTE_CHANGED   1
 #define REMOTE_CLICK     2
 #define REMOTE_PREFS     4
 #define REMOTE_DIRECTION 8
+void remoteTickTime();
+int remoteDoCommand(char key);
+char readSerialChar();
 
 #endif // COMMON_H
